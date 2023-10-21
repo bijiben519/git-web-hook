@@ -5,13 +5,13 @@ const app = express();
 const port = 8888;
 
 app.post('/webhook', (req, res) => {
-  const { dir, task } = req.query;
+  const { dir } = req.query;
 
-  if (!dir || !task) {
+  if (!dir) {
     return res.status(400).send('缺少必要的参数');
   }
 
-  exec(`cd /root/own/${dir} && git pull && pm2 restart ${task}`, (error, stdout, stderr) => {
+  exec(`cd /root/own/${dir} && ./deploy.sh`, (error, stdout, stderr) => {
     if (error) {
       console.error(`执行重新部署命令时出错：${error}`);
       return res.status(500).send('重新部署失败');
