@@ -6,7 +6,7 @@
       "url": "https://github.com/bijiben519/gatsbyjs-docs",
       "path": "/root/own/docs",
       "reset": true,
-      "deploy": "deploy.js"
+      "deploy": "./deploy.js"
     }
   ]
 }
