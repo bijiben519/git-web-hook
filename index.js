@@ -138,7 +138,7 @@ function updateRepo(repo, callback) {
     logger.info('check repository branch' + repo.pushBranch);
 
     const cmd = `current_branch=$(git branch --show-current)
-    webhook_branch=${repo.pushBranch}
+    webhook_branch="${repo.pushBranch}"
     
     if [ "$current_branch" = "$webhook_branch" ]; then
         echo "当前分支和 Web Hook 分支匹配"
@@ -151,9 +151,8 @@ function updateRepo(repo, callback) {
       if (err) return callback('check branch failed: ' + err);
 
       logger.debug('check branch: ' + stdout.trim() + '\n' + stderr.trim());
+      then();
     });
-
-    then();
   }
 
   function gitPull() {
