@@ -147,7 +147,7 @@ function updateRepo(repo, callback) {
     fi
     `;
 
-    exec(cmd, function(err, stdout, stderr) {
+    exec(cmd, { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
       if (err) return callback('check branch failed: 当前分支和 Web Hook 分支不匹配');
 
       logger.info('check branch: ' + stdout.trim() + '\n' + stderr.trim());
