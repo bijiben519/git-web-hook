@@ -94,11 +94,19 @@ function postHook(req, res, next) {
     return next('Unrecognized payload: ' + JSON.stringify(req.body.payload));
 
   // Get the URL of the repository that this ping is about
-  var repoUrl = (payload.canon_url) ?
-    payload.canon_url + payload.repository.absolute_url :
-    payload.repository.url;
+  var repoUrl = payload.repository.url;
   if (!repoUrl)
     return next('Unknown repository url in payload: ' + req.body.payload);
+
+  // get push branch
+  let pushBranch = '';
+  const pushRef = payload.ref;
+  if (pushRef) {
+    const arr = pushRef.split('/');
+    if (arr.length > 2) {
+      pushBranch = arr.slice(2).join('/');
+    }
+  }
 
   log.info('Received a ping for repository ' + repoUrl + ' from ' + req.ip);
   log.debug('payload=' + req.body.payload);
@@ -130,7 +138,7 @@ function postHook(req, res, next) {
     return res.send('OK');
 
   // Update/deploy each configured repository matching the current ping
-  async.eachSeries(repos, updateRepo,
+  async.eachSeries(repos.map(repo => ({ ...repo, pushBranch })), updateRepo,
     function(err) {
       if (err)
         log.error(err);
@@ -142,20 +150,46 @@ function postHook(req, res, next) {
   res.send('OK');
 }
 
+
 function updateRepo(repo, callback) {
-  log.info('Updating repository ' + repo.path);
 
-  if (repo.reset) {
-    exec('git reset --hard HEAD', { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
-      if (err) return callback('git reset --hard HEAD in ' + repo.path + ' failed: ' + err);
+  checkBranch(() => {
+    log.info('Updating repository ' + repo.path);
 
-      log.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
-      log.info('Reset repository ' + repo.url + ' -> ' + repo.path);
+    if (repo.reset) {
+      exec('git reset --hard HEAD', { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
+        if (err) return callback('git reset --hard HEAD in ' + repo.path + ' failed: ' + err);
 
+        log.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
+        log.info('Reset repository ' + repo.url + ' -> ' + repo.path);
+
+        gitPull();
+      });
+    } else {
       gitPull();
+    }
+  });
+
+  function checkBranch(then) {
+    log.info('check repository branch' + repo.pushBranch);
+
+    const cmd = `current_branch=$(git branch --show-current)
+    webhook_branch=${repo.pushBranch}
+    
+    if [ "$current_branch" = "$webhook_branch" ]; then
+        echo "当前分支和 Web Hook 分支匹配"
+    else
+        exit "当前分支和 Web Hook 分支不匹配"
+    fi
+    `;
+
+    exec(cmd, function(err, stdout, stderr) {
+      if (err) return callback('check branch failed: ' + err);
+
+      log.debug('check branch: ' + stdout.trim() + '\n' + stderr.trim());
     });
-  } else {
-    gitPull();
+
+    then();
   }
 
   function gitPull() {
