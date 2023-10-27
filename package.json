@@ -14,6 +14,10 @@
   "author": "king",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2"
+    "async": "0.2.9",
+    "express": "3.3.2",
+    "nconf": "0.6.7",
+    "request": "2.21.0",
+    "winston": "0.7.2"
   }
 }
