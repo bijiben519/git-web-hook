@@ -143,12 +143,12 @@ function updateRepo(repo, callback) {
     if [ "$current_branch" = "$webhook_branch" ]; then
         echo "当前分支和 Web Hook 分支匹配"
     else
-        exit "当前分支和 Web Hook 分支不匹配"
+        exit 1
     fi
     `;
 
     exec(cmd, function(err, stdout, stderr) {
-      if (err) return callback('check branch failed: ' + err);
+      if (err) return callback('check branch failed: 当前分支和 Web Hook 分支不匹配');
 
       logger.debug('check branch: ' + stdout.trim() + '\n' + stderr.trim());
       then();
