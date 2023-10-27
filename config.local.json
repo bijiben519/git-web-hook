@@ -1,6 +1,6 @@
 {
   "log_level": "info",
-  "log_path": "gitdeploy.log",
+  "log_path": "app.log",
   "repositories": [
     {
       "url": "https://github.com/bijiben519/gatsbyjs-docs",

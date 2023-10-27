@@ -9,6 +9,21 @@ var PULL_TIMEOUT_MS = 1000 * 60 * 20; // 20 minutes
 var DEPLOY_TIMEOUT_MS = 1000 * 60 * 20; // 20 minutes
 var MAX_OUTPUT_BYTES = 524288; // 512 KB
 
+// Load config settings
+nconf
+  .argv({ f: { alias: 'config', describe: 'configuration file' } })
+  .env();
+if (nconf.get('help'))
+  return console.log('Usage: gitdeploy [-f config.json]');
+if (nconf.get('config'))
+  nconf.file('system', nconf.get('config'));
+nconf
+  .file('user', __dirname + '/config.local.json')
+  .file('base', __dirname + '/config.json');
+// Make sure we have permission to bind to the requested port
+if (nconf.get('web_port') < 1024 && process.getuid() !== 0)
+  throw new Error('Binding to ports less than 1024 requires root privileges');
+
 // 创建一个 Winston 日志记录器
 const logger = winston.createLogger({
   level: nconf.get('log_level') || 'info',
@@ -27,63 +42,33 @@ const logger = winston.createLogger({
   ]
 });
 
-main();
 
+var app = express();
+// 解析 application/json 类型的请求体
+app.use(express.json());
+// 解析 application/x-www-form-urlencoded 类型的请求体
+app.use(express.urlencoded({ extended: false }));
+// 日志记录中间件
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url}`);
+  next();
+});
+// Load the request handler
+app.post('/webhook', postHook);
+// Setup error handling/logging
+app.all('*', utils.handle404);
+app.use(utils.requestErrorLogger(logger));
+app.use(utils.handle500);
+// Start listening for requests
+app.listen(nconf.get('web_port'), listeningHandler);
 
-function main() {
-  // Load config settings
-  nconf
-    .argv({ f: { alias: 'config', describe: 'configuration file' } })
-    .env();
-
-  if (nconf.get('help'))
-    return console.log('Usage: gitdeploy [-f config.json]');
-
-  if (nconf.get('config'))
-    nconf.file('system', nconf.get('config'));
-
-  nconf
-    .file('user', __dirname + '/config.local.json')
-    .file('base', __dirname + '/config.json');
-
-  // Make sure we have permission to bind to the requested port
-  if (nconf.get('web_port') < 1024 && process.getuid() !== 0)
-    throw new Error('Binding to ports less than 1024 requires root privileges');
-
-  var app = express();
-
-  // 解析 application/json 类型的请求体
-  app.use(express.json());
-
-  // 解析 application/x-www-form-urlencoded 类型的请求体
-  app.use(express.urlencoded({ extended: false }));
-
-  // 日志记录中间件
-  app.use((req, res, next) => {
-    logger.info(`${req.method} ${req.url}`);
-    next();
-  });
-
-  // Load the request handler
-  app.post('/webhook', postHook);
-
-  // Setup error handling/logging
-  app.all('*', utils.handle404);
-  app.use(utils.requestErrorLogger(logger));
-  app.use(utils.handle500);
-
-  // Start listening for requests
-  app.listen(nconf.get('web_port'), listeningHandler);
-}
 
 function listeningHandler() {
   logger.info('gitdeploy is listening on port %d ', nconf.get('web_port'));
 }
 
 function postHook(req, res, next) {
-  var payload;
-  try { payload = JSON.parse(req.body.payload); }
-  catch (ex) { return next('Unparseable POST body: ' + JSON.stringify(req.body)); }
+  const payload = req.body;
 
   if (!payload.repository)
     return next('Unrecognized payload: ' + JSON.stringify(req.body.payload));
