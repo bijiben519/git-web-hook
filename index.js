@@ -1,14 +1,31 @@
 var async = require('async');
 var nconf = require('nconf');
-var log = require('winston');
+var winston = require('winston');
 var express = require('express');
-var request = require('request');
 var exec = require('child_process').exec;
 var utils = require('./utils');
 
 var PULL_TIMEOUT_MS = 1000 * 60 * 20; // 20 minutes
 var DEPLOY_TIMEOUT_MS = 1000 * 60 * 20; // 20 minutes
 var MAX_OUTPUT_BYTES = 524288; // 512 KB
+
+// 创建一个 Winston 日志记录器
+const logger = winston.createLogger({
+  level: nconf.get('log_level') || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.colorize(),
+    winston.format.splat(),
+    winston.format.simple(),
+    winston.format.printf(({ level, message, label, timestamp }) => {
+      return `${level}【${timestamp}】${label || ''}: ${message}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: nconf.get('log_path') || 'app.log' })
+  ]
+});
 
 main();
 
@@ -29,60 +46,38 @@ function main() {
     .file('user', __dirname + '/config.local.json')
     .file('base', __dirname + '/config.json');
 
-  // Setup console logging
-  log.loggers.options.transports = [];
-  log.remove(log.transports.Console);
-  var logger = log.add(log.transports.Console, { level: nconf.get('log_level'),
-    colorize: true, timestamp: utils.shortDate });
-  log.loggers.options.transports.push(logger.transports.console);
-
   // Make sure we have permission to bind to the requested port
   if (nconf.get('web_port') < 1024 && process.getuid() !== 0)
     throw new Error('Binding to ports less than 1024 requires root privileges');
 
-  var app = module.exports = express();
-  var server = require('http').createServer(app);
+  var app = express();
 
-  app.disable('x-powered-by');
-  app.use(utils.catchRequestErrors);
-  app.use(express.bodyParser());
+  // 解析 application/json 类型的请求体
+  app.use(express.json());
 
-  // Setup request logging
-  app.use(utils.requestLogger({ transports: log.loggers.options.transports }));
+  // 解析 application/x-www-form-urlencoded 类型的请求体
+  app.use(express.urlencoded({ extended: false }));
+
+  // 日志记录中间件
+  app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.url}`);
+    next();
+  });
 
   // Load the request handler
   app.post('/webhook', postHook);
 
   // Setup error handling/logging
   app.all('*', utils.handle404);
-  app.use(app.router);
-  app.use(utils.requestErrorLogger({ transports: log.loggers.options.transports }));
+  app.use(utils.requestErrorLogger(logger));
   app.use(utils.handle500);
 
   // Start listening for requests
-  server.listen(nconf.get('web_port'), listeningHandler);
+  app.listen(nconf.get('web_port'), listeningHandler);
 }
 
 function listeningHandler() {
-  // If run_as_user is set, try to switch users
-  if (nconf.get('run_as_user')) {
-    try {
-      process.setuid(nconf.get('run_as_user'));
-      log.info('Changed to running as user ' + nconf.get('run_as_user'));
-    } catch (err) {
-      log.error('Failed to change to user ' + nconf.get('run_as_user') + ': ' + err);
-    }
-  }
-
-  // Now that we've dropped root privileges (if requested), setup file logging
-  // NOTE: Any messages logged before this will go to the console only
-  if (nconf.get('log_path')) {
-    var logger = log.add(log.transports.File, { level: nconf.get('log_level'),
-      filename: nconf.get('log_path') });
-    log.loggers.options.transports.push(logger.transports.file);
-  }
-
-  log.info('gitdeploy is listening on port ' + nconf.get('web_port'));
+  logger.info('gitdeploy is listening on port %d ', nconf.get('web_port'));
 }
 
 function postHook(req, res, next) {
@@ -108,24 +103,8 @@ function postHook(req, res, next) {
     }
   }
 
-  log.info('Received a ping for repository ' + repoUrl + ' from ' + req.ip);
-  log.debug('payload=' + req.body.payload);
-
-  // Forward this request
-  var forwards = nconf.get('forward_to');
-  if (forwards) {
-    forwards.forEach(function(url) {
-      log.info('Forwarding ping to ' + url);
-      request.post({ url: url, headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'payload=' + req.body.payload }, function(err)
-      {
-        if (err)
-          log.warn('Failed to forward ping to ' + url + ': ' + err);
-        else
-          log.info('Successfully forwarded ping to ' + url);
-      });
-    });
-  }
+  logger.info('Received a ping for repository ' + repoUrl + ' from ' + req.ip);
+  logger.debug('payload=' + req.body.payload);
 
   // Get the list of configured repositories
   var repos = nconf.get('repositories');
@@ -141,9 +120,9 @@ function postHook(req, res, next) {
   async.eachSeries(repos.map(repo => ({ ...repo, pushBranch })), updateRepo,
     function(err) {
       if (err)
-        log.error(err);
+        logger.error(err);
       else
-        log.info('Finished updating all repositories');
+        logger.info('Finished updating all repositories');
     }
   );
 
@@ -154,14 +133,14 @@ function postHook(req, res, next) {
 function updateRepo(repo, callback) {
 
   checkBranch(() => {
-    log.info('Updating repository ' + repo.path);
+    logger.info('Updating repository ' + repo.path);
 
     if (repo.reset) {
       exec('git reset --hard HEAD', { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
         if (err) return callback('git reset --hard HEAD in ' + repo.path + ' failed: ' + err);
 
-        log.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
-        log.info('Reset repository ' + repo.url + ' -> ' + repo.path);
+        logger.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
+        logger.info('Reset repository ' + repo.url + ' -> ' + repo.path);
 
         gitPull();
       });
@@ -171,7 +150,7 @@ function updateRepo(repo, callback) {
   });
 
   function checkBranch(then) {
-    log.info('check repository branch' + repo.pushBranch);
+    logger.info('check repository branch' + repo.pushBranch);
 
     const cmd = `current_branch=$(git branch --show-current)
     webhook_branch=${repo.pushBranch}
@@ -186,7 +165,7 @@ function updateRepo(repo, callback) {
     exec(cmd, function(err, stdout, stderr) {
       if (err) return callback('check branch failed: ' + err);
 
-      log.debug('check branch: ' + stdout.trim() + '\n' + stderr.trim());
+      logger.debug('check branch: ' + stdout.trim() + '\n' + stderr.trim());
     });
 
     then();
@@ -196,13 +175,13 @@ function updateRepo(repo, callback) {
     exec('git pull', { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
       if (err) return callback('git pull in ' + repo.path + ' failed: ' + err);
 
-      log.debug('[git pull] ' + stdout.trim() + '\n' + stderr.trim());
-      log.info('Updated repository ' + repo.url + ' -> ' + repo.path);
+      logger.debug('[git pull] ' + stdout.trim() + '\n' + stderr.trim());
+      logger.info('Updated repository ' + repo.url + ' -> ' + repo.path);
 
       if (!repo.deploy)
         return callback();
 
-      log.info('Running deployment "' + repo.deploy + '"');
+      logger.info('Running deployment "' + repo.deploy + '"');
       exec(repo.deploy, { env: process.env, cwd: repo.path, timeout: DEPLOY_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
         if (err)
           return callback('Deploy "' + repo.deploy + '" failed: ' + err);
@@ -212,8 +191,8 @@ function updateRepo(repo, callback) {
         if (stderr)
           stdout += '\n' + stderr.trim();
 
-        log.debug('[' + repo.deploy + '] ' + stdout);
-        log.info('Finished deployment "' + repo.deploy + '"');
+        logger.debug('[' + repo.deploy + '] ' + stdout);
+        logger.info('Finished deployment "' + repo.deploy + '"');
 
         callback();
       });
