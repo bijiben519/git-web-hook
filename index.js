@@ -116,12 +116,15 @@ function postHook(req, res, next) {
 
 
 function updateRepo(repo, callback) {
+  exec(`cd ${repo.path}`, function(err) {
+    return callback('path dose not exist!');
+  });
 
   checkBranch(() => {
     logger.info('Updating repository ' + repo.path);
 
     if (repo.reset) {
-      exec('git reset --hard HEAD', { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
+      exec('git reset --hard HEAD', function(err, stdout, stderr) {
         if (err) return callback('git reset --hard HEAD in ' + repo.path + ' failed: ' + err);
 
         logger.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
@@ -147,7 +150,7 @@ function updateRepo(repo, callback) {
     fi
     `;
 
-    exec(cmd, { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
+    exec(cmd, function(err, stdout, stderr) {
       if (err) return callback('check branch failed: 当前分支和 Web Hook 分支不匹配');
 
       logger.info('check branch: ' + stdout.trim() + '\n' + stderr.trim());
@@ -156,7 +159,7 @@ function updateRepo(repo, callback) {
   }
 
   function gitPull() {
-    exec('git pull', { cwd: repo.path, timeout: PULL_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
+    exec('git pull', function(err, stdout, stderr) {
       if (err) return callback('git pull in ' + repo.path + ' failed: ' + err);
 
       logger.debug('[git pull] ' + stdout.trim() + '\n' + stderr.trim());
@@ -166,7 +169,7 @@ function updateRepo(repo, callback) {
         return callback();
 
       logger.info('Running deployment "' + repo.deploy + '"');
-      exec(repo.deploy, { env: process.env, cwd: repo.path, timeout: DEPLOY_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES }, function(err, stdout, stderr) {
+      exec(repo.deploy, function(err, stdout, stderr) {
         if (err)
           return callback('Deploy "' + repo.deploy + '" failed: ' + err);
 
