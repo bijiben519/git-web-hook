@@ -117,25 +117,28 @@ function postHook(req, res, next) {
 
 function updateRepo(repo, callback) {
   exec(`cd ${repo.path}`, function(err) {
-    return callback('path dose not exist!');
-  });
-
-  checkBranch(() => {
-    logger.info('Updating repository ' + repo.path);
-
-    if (repo.reset) {
-      exec('git reset --hard HEAD', function(err, stdout, stderr) {
-        if (err) return callback('git reset --hard HEAD in ' + repo.path + ' failed: ' + err);
-
-        logger.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
-        logger.info('Reset repository ' + repo.url + ' -> ' + repo.path);
-
-        gitPull();
-      });
-    } else {
-      gitPull();
+    if (err) {
+      return callback('path dose not exist!');
     }
+    checkBranch(() => {
+      logger.info('Updating repository ' + repo.url);
+  
+      if (repo.reset) {
+        exec('git reset --hard HEAD', function(err, stdout, stderr) {
+          if (err) return callback('git reset --hard HEAD in ' + repo.path + ' failed: ' + err);
+  
+          logger.debug('[git reset] ' + stdout.trim() + '\n' + stderr.trim());
+          logger.info('Reset repository ' + repo.url + ' -> ' + repo.path);
+  
+          gitPull();
+        });
+      } else {
+        gitPull();
+      }
+    });
   });
+
+  
 
   function checkBranch(then) {
     logger.info('check repository branch:' + repo.pushBranch);
